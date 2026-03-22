@@ -3,8 +3,24 @@
 **/*.o
 **/*.s
 **/a.out
+**/*.exe
+**/*.dSYM/
 /tmp*
 /thirdparty
 /chibicc
-/test/*.exe
 /stage2
+
+# Build output directory
+/output/
+
+# macOS filesystem metadata
+.DS_Store
+**/.DS_Store
+.AppleDouble
+**/.AppleDouble
+.LSOverride
+
+# macOS Finder metadata
+._*
+.Spotlight-V100
+.Trashes

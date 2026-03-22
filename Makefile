@@ -1,7 +1,11 @@
 CFLAGS=-std=c11 -g -fno-common -Wall -Wno-switch
 
-SRCS=$(wildcard *.c)
-OBJS=$(SRCS:.c=.o)
+SRC_DIR=src
+OBJ_DIR=output
+
+SRCS=$(wildcard $(SRC_DIR)/*.c)
+OBJS=$(SRCS:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
+STAGE2_OBJS=$(SRCS:$(SRC_DIR)/%.c=stage2/$(OBJ_DIR)/%.o)
 
 TEST_SRCS=$(wildcard test/*.c)
 TESTS=$(TEST_SRCS:.c=.exe)
@@ -11,7 +15,9 @@ TESTS=$(TEST_SRCS:.c=.exe)
 chibicc: $(OBJS)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
-$(OBJS): chibicc.h
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c chibicc.h
+	mkdir -p $(OBJ_DIR)
+	$(CC) $(CFLAGS) -I. -c -o $@ $<
 
 test/%.exe: chibicc test/%.c
 	./chibicc -Iinclude -Itest -c -o test/$*.o test/$*.c
@@ -25,12 +31,12 @@ test-all: test test-stage2
 
 # Stage 2
 
-stage2/chibicc: $(OBJS:%=stage2/%)
+stage2/chibicc: $(STAGE2_OBJS)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
-stage2/%.o: chibicc %.c
-	mkdir -p stage2/test
-	./chibicc -c -o $(@D)/$*.o $*.c
+stage2/$(OBJ_DIR)/%.o: chibicc $(SRC_DIR)/%.c chibicc.h
+	mkdir -p stage2/$(OBJ_DIR)
+	./chibicc -I. -c -o $@ $<
 
 stage2/test/%.exe: stage2/chibicc test/%.c
 	mkdir -p stage2/test
@@ -44,7 +50,7 @@ test-stage2: $(TESTS:test/%=stage2/test/%)
 # Misc.
 
 clean:
-	rm -rf chibicc tmp* $(TESTS) test/*.s test/*.exe stage2
+	rm -rf chibicc $(OBJ_DIR) tmp* $(TESTS) test/*.s test/*.exe stage2
 	find * -type f '(' -name '*~' -o -name '*.o' ')' -exec rm {} ';'
 
 .PHONY: test clean test-stage2
