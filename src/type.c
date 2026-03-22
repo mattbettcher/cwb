@@ -15,7 +15,16 @@ Type *ty_ulong = &(Type){TY_LONG, 8, 8, true};
 
 Type *ty_float = &(Type){TY_FLOAT, 4, 4};
 Type *ty_double = &(Type){TY_DOUBLE, 8, 8};
-Type *ty_ldouble = &(Type){TY_LDOUBLE, 16, 16};
+static Type ty_ldouble_16 = {TY_LDOUBLE, 16, 16};
+static Type ty_ldouble_8 = {TY_LDOUBLE, 8, 8};
+Type *ty_ldouble;
+
+void init_ldouble_type(void) {
+  if (current_target == TARGET_AARCH64)
+    ty_ldouble = &ty_ldouble_8;
+  else
+    ty_ldouble = &ty_ldouble_16;
+}
 
 static Type *new_type(TypeKind kind, int size, int align) {
   Type *ty = calloc(1, sizeof(Type));

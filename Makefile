@@ -15,9 +15,9 @@ TESTS=$(TEST_SRCS:.c=.exe)
 chibicc: $(OBJS)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
-$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c chibicc.h
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c $(SRC_DIR)/chibicc.h
 	mkdir -p $(OBJ_DIR)
-	$(CC) $(CFLAGS) -I. -c -o $@ $<
+	$(CC) $(CFLAGS) -I$(SRC_DIR) -I. -c -o $@ $<
 
 test/%.exe: chibicc test/%.c
 	./chibicc -Iinclude -Itest -c -o test/$*.o test/$*.c
@@ -34,9 +34,9 @@ test-all: test test-stage2
 stage2/chibicc: $(STAGE2_OBJS)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
-stage2/$(OBJ_DIR)/%.o: chibicc $(SRC_DIR)/%.c chibicc.h
+stage2/$(OBJ_DIR)/%.o: chibicc $(SRC_DIR)/%.c $(SRC_DIR)/chibicc.h
 	mkdir -p stage2/$(OBJ_DIR)
-	./chibicc -I. -c -o $@ $<
+	./chibicc -I$(SRC_DIR) -I. -c -o $@ $<
 
 stage2/test/%.exe: stage2/chibicc test/%.c
 	mkdir -p stage2/test

@@ -1057,6 +1057,29 @@ static char *format_time(struct tm *tm) {
   return format("\"%02d:%02d:%02d\"", tm->tm_hour, tm->tm_min, tm->tm_sec);
 }
 
+TargetKind parse_target(char *s) {
+  if (!strcmp(s, "x86_64") || !strcmp(s, "x86_64-linux-gnu") ||
+      !strcmp(s, "amd64") || !strcmp(s, "amd64-linux-gnu"))
+    return TARGET_X86_64;
+
+  if (!strcmp(s, "aarch64") || !strcmp(s, "aarch64-linux-gnu") ||
+      !strcmp(s, "arm64"))
+    return TARGET_AARCH64;
+
+  error("unsupported target: %s", s);
+}
+
+char *target_name(TargetKind target) {
+  switch (target) {
+  case TARGET_X86_64:
+    return "x86_64-linux-gnu";
+  case TARGET_AARCH64:
+    return "aarch64-linux-gnu";
+  }
+
+  unreachable();
+}
+
 void init_macros(void) {
   // Define predefined macros
   define_macro("_LP64", "1");
@@ -1066,7 +1089,7 @@ void init_macros(void) {
   define_macro("__SIZEOF_DOUBLE__", "8");
   define_macro("__SIZEOF_FLOAT__", "4");
   define_macro("__SIZEOF_INT__", "4");
-  define_macro("__SIZEOF_LONG_DOUBLE__", "8");
+  define_macro("__SIZEOF_LONG_DOUBLE__", current_target == TARGET_AARCH64 ? "8" : "16");
   define_macro("__SIZEOF_LONG_LONG__", "8");
   define_macro("__SIZEOF_LONG__", "8");
   define_macro("__SIZEOF_POINTER__", "8");
@@ -1082,8 +1105,6 @@ void init_macros(void) {
   define_macro("__STDC__", "1");
   define_macro("__USER_LABEL_PREFIX__", "");
   define_macro("__alignof__", "_Alignof");
-  define_macro("__amd64", "1");
-  define_macro("__amd64__", "1");
   define_macro("__chibicc__", "1");
   define_macro("__const__", "const");
   define_macro("__gnu_linux__", "1");
@@ -1095,10 +1116,21 @@ void init_macros(void) {
   define_macro("__unix", "1");
   define_macro("__unix__", "1");
   define_macro("__volatile__", "volatile");
-  define_macro("__x86_64", "1");
-  define_macro("__x86_64__", "1");
   define_macro("linux", "1");
   define_macro("unix", "1");
+
+  switch (current_target) {
+  case TARGET_X86_64:
+    define_macro("__amd64", "1");
+    define_macro("__amd64__", "1");
+    define_macro("__x86_64", "1");
+    define_macro("__x86_64__", "1");
+    break;
+  case TARGET_AARCH64:
+    define_macro("__aarch64__", "1");
+    define_macro("__arm64__", "1");
+    break;
+  }
 
   add_builtin("__FILE__", file_macro);
   add_builtin("__LINE__", line_macro);

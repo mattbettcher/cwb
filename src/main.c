@@ -4,6 +4,8 @@ typedef enum {
   FILE_NONE, FILE_C, FILE_ASM, FILE_OBJ, FILE_AR, FILE_DSO,
 } FileType;
 
+TargetKind current_target = TARGET_X86_64;
+
 StringArray include_paths;
 bool opt_fcommon = true;
 bool opt_fpic;
@@ -35,19 +37,44 @@ static StringArray input_paths;
 static StringArray tmpfiles;
 
 static void usage(int status) {
-  fprintf(stderr, "chibicc [ -o <path> ] <file>\n");
+  fprintf(stderr, "chibicc [ -target <triple> ] [ -o <path> ] <file>\n");
   exit(status);
 }
 
 static bool take_arg(char *arg) {
   char *x[] = {
-    "-o", "-I", "-idirafter", "-include", "-x", "-MF", "-MT", "-Xlinker",
+    "-o", "-I", "-idirafter", "-include", "-x", "-MF", "-MT", "-Xlinker", "-target",
   };
 
   for (int i = 0; i < sizeof(x) / sizeof(*x); i++)
     if (!strcmp(arg, x[i]))
       return true;
   return false;
+}
+
+static bool startswith(char *p, char *q) {
+  return strncmp(p, q, strlen(q)) == 0;
+}
+
+static void parse_target_args(int argc, char **argv) {
+  for (int i = 1; i < argc; i++) {
+    if (!strcmp(argv[i], "-target")) {
+      if (!argv[++i])
+        usage(1);
+      current_target = parse_target(argv[i]);
+      continue;
+    }
+
+    if (startswith(argv[i], "-target=")) {
+      current_target = parse_target(argv[i] + strlen("-target="));
+      continue;
+    }
+
+    if (startswith(argv[i], "--target=")) {
+      current_target = parse_target(argv[i] + strlen("--target="));
+      continue;
+    }
+  }
 }
 
 static void add_default_include_paths(char *argv0) {
@@ -57,7 +84,14 @@ static void add_default_include_paths(char *argv0) {
 
   // Add standard include paths.
   strarray_push(&include_paths, "/usr/local/include");
-  strarray_push(&include_paths, "/usr/include/x86_64-linux-gnu");
+  switch (current_target) {
+  case TARGET_X86_64:
+    strarray_push(&include_paths, "/usr/include/x86_64-linux-gnu");
+    break;
+  case TARGET_AARCH64:
+    strarray_push(&include_paths, "/usr/include/aarch64-linux-gnu");
+    break;
+  }
   strarray_push(&include_paths, "/usr/include");
 
   // Keep a copy of the standard include paths for -MMD option.
@@ -134,6 +168,14 @@ static void parse_args(int argc, char **argv) {
 
     if (!strcmp(argv[i], "--help"))
       usage(0);
+
+    if (!strcmp(argv[i], "-target")) {
+      i++;
+      continue;
+    }
+
+    if (startswith(argv[i], "-target=") || startswith(argv[i], "--target="))
+      continue;
 
     if (!strcmp(argv[i], "-o")) {
       opt_o = argv[++i];
@@ -339,7 +381,7 @@ static void parse_args(int argc, char **argv) {
   for (int i = 0; i < idirafter.len; i++)
     strarray_push(&include_paths, idirafter.data[i]);
 
-  if (input_paths.len == 0)
+  if (!opt_cc1 && input_paths.len == 0)
     error("no input files");
 
   // -E implies that the input is the C macro language.
@@ -568,7 +610,14 @@ static void cc1(void) {
 }
 
 static void assemble(char *input, char *output) {
-  char *cmd[] = {"as", "-c", input, "-o", output, NULL};
+  char *cmd[] = {
+    current_target == TARGET_AARCH64 ? "aarch64-linux-gnu-as" : "as",
+    "-c",
+    input,
+    "-o",
+    output,
+    NULL,
+  };
   run_subprocess(cmd);
 }
 
@@ -589,21 +638,37 @@ bool file_exists(char *path) {
 }
 
 static char *find_libpath(void) {
-  if (file_exists("/usr/lib/x86_64-linux-gnu/crti.o"))
-    return "/usr/lib/x86_64-linux-gnu";
-  if (file_exists("/usr/lib64/crti.o"))
-    return "/usr/lib64";
+  if (current_target == TARGET_X86_64) {
+    if (file_exists("/usr/lib/x86_64-linux-gnu/crti.o"))
+      return "/usr/lib/x86_64-linux-gnu";
+    if (file_exists("/usr/lib64/crti.o"))
+      return "/usr/lib64";
+  } else {
+    if (file_exists("/usr/lib/aarch64-linux-gnu/crti.o"))
+      return "/usr/lib/aarch64-linux-gnu";
+    if (file_exists("/lib/aarch64-linux-gnu/crti.o"))
+      return "/lib/aarch64-linux-gnu";
+    if (file_exists("/usr/aarch64-linux-gnu/lib/crti.o"))
+      return "/usr/aarch64-linux-gnu/lib";
+  }
   error("library path is not found");
 }
 
 static char *find_gcc_libpath(void) {
-  char *paths[] = {
-    "/usr/lib/gcc/x86_64-linux-gnu/*/crtbegin.o",
-    "/usr/lib/gcc/x86_64-pc-linux-gnu/*/crtbegin.o", // For Gentoo
-    "/usr/lib/gcc/x86_64-redhat-linux/*/crtbegin.o", // For Fedora
-  };
+  char *paths[5] = {};
+  int len = 0;
 
-  for (int i = 0; i < sizeof(paths) / sizeof(*paths); i++) {
+  if (current_target == TARGET_X86_64) {
+    paths[len++] = "/usr/lib/gcc/x86_64-linux-gnu/*/crtbegin.o";
+    paths[len++] = "/usr/lib/gcc/x86_64-pc-linux-gnu/*/crtbegin.o";
+    paths[len++] = "/usr/lib/gcc/x86_64-redhat-linux/*/crtbegin.o";
+  } else {
+    paths[len++] = "/usr/lib/gcc/aarch64-linux-gnu/*/crtbegin.o";
+    paths[len++] = "/usr/lib/gcc-cross/aarch64-linux-gnu/*/crtbegin.o";
+    paths[len++] = "/usr/aarch64-linux-gnu/lib/gcc/aarch64-linux-gnu/*/crtbegin.o";
+  }
+
+  for (int i = 0; i < len; i++) {
     char *path = find_file(paths[i]);
     if (path)
       return dirname(path);
@@ -615,11 +680,11 @@ static char *find_gcc_libpath(void) {
 static void run_linker(StringArray *inputs, char *output) {
   StringArray arr = {};
 
-  strarray_push(&arr, "ld");
+  strarray_push(&arr, current_target == TARGET_AARCH64 ? "aarch64-linux-gnu-ld" : "ld");
   strarray_push(&arr, "-o");
   strarray_push(&arr, output);
   strarray_push(&arr, "-m");
-  strarray_push(&arr, "elf_x86_64");
+  strarray_push(&arr, current_target == TARGET_AARCH64 ? "aarch64linux" : "elf_x86_64");
 
   char *libpath = find_libpath();
   char *gcc_libpath = find_gcc_libpath();
@@ -634,18 +699,26 @@ static void run_linker(StringArray *inputs, char *output) {
   }
 
   strarray_push(&arr, format("-L%s", gcc_libpath));
-  strarray_push(&arr, "-L/usr/lib/x86_64-linux-gnu");
-  strarray_push(&arr, "-L/usr/lib64");
-  strarray_push(&arr, "-L/lib64");
-  strarray_push(&arr, "-L/usr/lib/x86_64-linux-gnu");
-  strarray_push(&arr, "-L/usr/lib/x86_64-pc-linux-gnu");
-  strarray_push(&arr, "-L/usr/lib/x86_64-redhat-linux");
+  if (current_target == TARGET_X86_64) {
+    strarray_push(&arr, "-L/usr/lib/x86_64-linux-gnu");
+    strarray_push(&arr, "-L/usr/lib64");
+    strarray_push(&arr, "-L/lib64");
+    strarray_push(&arr, "-L/usr/lib/x86_64-linux-gnu");
+    strarray_push(&arr, "-L/usr/lib/x86_64-pc-linux-gnu");
+    strarray_push(&arr, "-L/usr/lib/x86_64-redhat-linux");
+  } else {
+    strarray_push(&arr, "-L/usr/lib/aarch64-linux-gnu");
+    strarray_push(&arr, "-L/lib/aarch64-linux-gnu");
+    strarray_push(&arr, "-L/usr/aarch64-linux-gnu/lib");
+  }
   strarray_push(&arr, "-L/usr/lib");
   strarray_push(&arr, "-L/lib");
 
   if (!opt_static) {
     strarray_push(&arr, "-dynamic-linker");
-    strarray_push(&arr, "/lib64/ld-linux-x86-64.so.2");
+    strarray_push(&arr, current_target == TARGET_AARCH64
+      ? "/lib/ld-linux-aarch64.so.1"
+      : "/lib64/ld-linux-x86-64.so.2");
   }
 
   for (int i = 0; i < ld_extra_args.len; i++)
@@ -699,6 +772,8 @@ static FileType get_file_type(char *filename) {
 
 int main(int argc, char **argv) {
   atexit(cleanup);
+  parse_target_args(argc, argv);
+  init_ldouble_type();
   init_macros();
   parse_args(argc, argv);
 

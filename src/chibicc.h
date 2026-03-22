@@ -31,6 +31,11 @@ typedef struct Member Member;
 typedef struct Relocation Relocation;
 typedef struct Hideset Hideset;
 
+typedef enum {
+  TARGET_X86_64,
+  TARGET_AARCH64,
+} TargetKind;
+
 //
 // strings.c
 //
@@ -114,6 +119,8 @@ Token *tokenize_file(char *filename);
 
 char *search_include_paths(char *filename);
 void init_macros(void);
+TargetKind parse_target(char *s);
+char *target_name(TargetKind target);
 void define_macro(char *name, char *buf);
 void undef_macro(char *name);
 Token *preprocess(Token *tok);
@@ -403,12 +410,15 @@ Type *vla_of(Type *base, Node *expr);
 Type *enum_type(void);
 Type *struct_type(void);
 void add_type(Node *node);
+void init_ldouble_type(void);
 
 //
 // codegen.c
 //
 
 void codegen(Obj *prog, FILE *out);
+void codegen_x86(Obj *prog, FILE *out);
+void codegen_arm64(Obj *prog, FILE *out);
 int align_to(int n, int align);
 
 //
@@ -455,3 +465,4 @@ extern StringArray include_paths;
 extern bool opt_fpic;
 extern bool opt_fcommon;
 extern char *base_file;
+extern TargetKind current_target;
