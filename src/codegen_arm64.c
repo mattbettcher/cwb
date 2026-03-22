@@ -946,76 +946,76 @@ static void gen_expr(Node *node) {
     }
     error_tok(node->tok, "invalid expression");
   }
-  }  // Close the switch statement
 
   gen_expr(node->rhs);
   push();
   gen_expr(node->lhs);
   pop("x1");
 
-  char *ax = (node->lhs->ty->kind == TY_LONG || node->lhs->ty->base) ? "x0" : "w0";
-  char *di = (node->lhs->ty->kind == TY_LONG || node->lhs->ty->base) ? "x1" : "w1";
-  char *tmp = (node->lhs->ty->kind == TY_LONG || node->lhs->ty->base) ? "x2" : "w2";
+    char *ax = (node->lhs->ty->kind == TY_LONG || node->lhs->ty->base) ? "x0" : "w0";
+    char *di = (node->lhs->ty->kind == TY_LONG || node->lhs->ty->base) ? "x1" : "w1";
+    char *tmp = (node->lhs->ty->kind == TY_LONG || node->lhs->ty->base) ? "x2" : "w2";
 
-  switch (node->kind) {
-  case ND_ADD:
-    println("  add %s, %s, %s", ax, ax, di);
-    truncate_to(node->ty);
-    return;
-  case ND_SUB:
-    println("  sub %s, %s, %s", ax, ax, di);
-    truncate_to(node->ty);
-    return;
-  case ND_MUL:
-    println("  mul %s, %s, %s", ax, ax, di);
-    truncate_to(node->ty);
-    return;
-  case ND_DIV:
-    println("  %sdiv %s, %s, %s", node->ty->is_unsigned ? "u" : "s", ax, ax, di);
-    truncate_to(node->ty);
-    return;
-  case ND_MOD:
-    println("  %sdiv %s, %s, %s", node->ty->is_unsigned ? "u" : "s", tmp, ax, di);
-    println("  msub %s, %s, %s, %s", ax, tmp, di, ax);
-    truncate_to(node->ty);
-    return;
-  case ND_BITAND:
-    println("  and %s, %s, %s", ax, ax, di);
-    truncate_to(node->ty);
-    return;
-  case ND_BITOR:
-    println("  orr %s, %s, %s", ax, ax, di);
-    truncate_to(node->ty);
-    return;
-  case ND_BITXOR:
-    println("  eor %s, %s, %s", ax, ax, di);
-    truncate_to(node->ty);
-    return;
-  case ND_EQ:
-  case ND_NE:
-  case ND_LT:
-  case ND_LE:
-    println("  cmp %s, %s", ax, di);
-    if (node->kind == ND_EQ)
-      println("  cset w0, eq");
-    else if (node->kind == ND_NE)
-      println("  cset w0, ne");
-    else if (node->kind == ND_LT)
-      println("  cset w0, %s", node->lhs->ty->is_unsigned ? "lo" : "lt");
-    else
-      println("  cset w0, %s", node->lhs->ty->is_unsigned ? "ls" : "le");
-    return;
-  case ND_SHL:
-    println("  lsl %s, %s, %s", ax, ax, di);
-    truncate_to(node->ty);
-    return;
-  case ND_SHR:
-    println("  %s %s, %s, %s", node->lhs->ty->is_unsigned ? "lsr" : "asr", ax, ax, di);
-    truncate_to(node->ty);
-    return;
+    switch (node->kind) {
+    case ND_ADD:
+      println("  add %s, %s, %s", ax, ax, di);
+      truncate_to(node->ty);
+      return;
+    case ND_SUB:
+      println("  sub %s, %s, %s", ax, ax, di);
+      truncate_to(node->ty);
+      return;
+    case ND_MUL:
+      println("  mul %s, %s, %s", ax, ax, di);
+      truncate_to(node->ty);
+      return;
+    case ND_DIV:
+      println("  %sdiv %s, %s, %s", node->ty->is_unsigned ? "u" : "s", ax, ax, di);
+      truncate_to(node->ty);
+      return;
+    case ND_MOD:
+      println("  %sdiv %s, %s, %s", node->ty->is_unsigned ? "u" : "s", tmp, ax, di);
+      println("  msub %s, %s, %s, %s", ax, tmp, di, ax);
+      truncate_to(node->ty);
+      return;
+    case ND_BITAND:
+      println("  and %s, %s, %s", ax, ax, di);
+      truncate_to(node->ty);
+      return;
+    case ND_BITOR:
+      println("  orr %s, %s, %s", ax, ax, di);
+      truncate_to(node->ty);
+      return;
+    case ND_BITXOR:
+      println("  eor %s, %s, %s", ax, ax, di);
+      truncate_to(node->ty);
+      return;
+    case ND_EQ:
+    case ND_NE:
+    case ND_LT:
+    case ND_LE:
+      println("  cmp %s, %s", ax, di);
+      if (node->kind == ND_EQ)
+        println("  cset w0, eq");
+      else if (node->kind == ND_NE)
+        println("  cset w0, ne");
+      else if (node->kind == ND_LT)
+        println("  cset w0, %s", node->lhs->ty->is_unsigned ? "lo" : "lt");
+      else
+        println("  cset w0, %s", node->lhs->ty->is_unsigned ? "ls" : "le");
+      return;
+    case ND_SHL:
+      println("  lsl %s, %s, %s", ax, ax, di);
+      truncate_to(node->ty);
+      return;
+    case ND_SHR:
+      println("  %s %s, %s, %s", node->lhs->ty->is_unsigned ? "lsr" : "asr", ax, ax, di);
+      truncate_to(node->ty);
+      return;
+    }
+
+    error_tok(node->tok, "invalid expression");
   }
-
-  error_tok(node->tok, "invalid expression");
 }
 
 static void compare_case_value(char *reg, long value) {

@@ -77,7 +77,8 @@ void warn_tok(Token *tok, char *fmt, ...) {
 
 // Consumes the current token if it matches `op`.
 bool equal(Token *tok, char *op) {
-  return memcmp(tok->loc, op, tok->len) == 0 && op[tok->len] == '\0';
+  size_t len = strlen(op);
+  return tok->len == len && memcmp(tok->loc, op, len) == 0;
 }
 
 // Ensure that the current token is `op`.

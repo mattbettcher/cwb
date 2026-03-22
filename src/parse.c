@@ -3221,9 +3221,15 @@ static Token *function(Token *tok, Type *basety, VarAttr *attr) {
   }
 
   fn->is_root = !(fn->is_static && fn->is_inline);
+  fn->tok = ty->name;
 
   if (consume(&tok, tok, ";"))
     return tok;
+
+  // In function definitions, an empty parameter list means no parameters.
+  // Keep K&R-style declaration behavior unchanged for non-definition uses.
+  if (fn->is_definition && ty->is_variadic && !ty->params)
+    ty->is_variadic = false;
 
   current_fn = fn;
   locals = NULL;
