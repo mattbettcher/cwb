@@ -20,7 +20,7 @@ static Type ty_ldouble_8 = {TY_LDOUBLE, 8, 8};
 Type *ty_ldouble;
 
 void init_ldouble_type(void) {
-  if (current_target == TARGET_AARCH64)
+  if (target_is_aarch64(current_target))
     ty_ldouble = &ty_ldouble_8;
   else
     ty_ldouble = &ty_ldouble_16;

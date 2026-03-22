@@ -10,33 +10,42 @@ typedef struct {
 
 typedef __va_elem va_list[1];
 
+#ifdef __aarch64__
+#define __VA_GP_MAX 64
+#define __VA_FP_MAX 128
+#else
+#define __VA_GP_MAX 48
+#define __VA_FP_MAX 112
+#endif
+
 #define va_start(ap, last) \
   do { *(ap) = *(__va_elem *)__va_area__; } while (0)
 
 #define va_end(ap)
 
 static void *__va_arg_mem(__va_elem *ap, int sz, int align) {
-  void *p = ap->overflow_arg_area;
+  unsigned long p = (unsigned long)ap->overflow_arg_area;
   if (align > 8)
     p = (p + 15) / 16 * 16;
-  ap->overflow_arg_area = ((unsigned long)p + sz + 7) / 8 * 8;
-  return p;
+
+  ap->overflow_arg_area = (void *)((p + sz + 7) / 8 * 8);
+  return (void *)p;
 }
 
 static void *__va_arg_gp(__va_elem *ap, int sz, int align) {
-  if (ap->gp_offset >= 48)
+  if (ap->gp_offset >= __VA_GP_MAX)
     return __va_arg_mem(ap, sz, align);
 
-  void *r = ap->reg_save_area + ap->gp_offset;
+  char *r = (char *)ap->reg_save_area + ap->gp_offset;
   ap->gp_offset += 8;
   return r;
 }
 
 static void *__va_arg_fp(__va_elem *ap, int sz, int align) {
-  if (ap->fp_offset >= 112)
+  if (ap->fp_offset >= __VA_FP_MAX)
     return __va_arg_mem(ap, sz, align);
 
-  void *r = ap->reg_save_area + ap->fp_offset;
+  char *r = (char *)ap->reg_save_area + ap->fp_offset;
   ap->fp_offset += 8;
   return r;
 }

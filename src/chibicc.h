@@ -33,8 +33,17 @@ typedef struct Hideset Hideset;
 
 typedef enum {
   TARGET_X86_64,
-  TARGET_AARCH64,
+  TARGET_AARCH64_LINUX,
+  TARGET_AARCH64_DARWIN,
 } TargetKind;
+
+static inline bool target_is_aarch64(TargetKind target) {
+  return target == TARGET_AARCH64_LINUX || target == TARGET_AARCH64_DARWIN;
+}
+
+static inline bool target_is_linux(TargetKind target) {
+  return target == TARGET_X86_64 || target == TARGET_AARCH64_LINUX;
+}
 
 //
 // strings.c
@@ -419,6 +428,20 @@ void init_ldouble_type(void);
 void codegen(Obj *prog, FILE *out);
 void codegen_x86(Obj *prog, FILE *out);
 void codegen_arm64(Obj *prog, FILE *out);
+
+typedef struct {
+  char *(*asm_symbol_name)(char *name, bool is_definition);
+  void (*emit_file_directive)(FILE *out, int file_no, char *name);
+  void (*emit_global_directive)(FILE *out, char *name, bool is_static);
+  void (*emit_text_symbol_header)(FILE *out, char *name);
+  void (*emit_data_symbol_header)(FILE *out, char *name, int size, int align);
+  void (*emit_bss_symbol_header)(FILE *out, char *name, int align, int size);
+  void (*emit_common_symbol)(FILE *out, char *name, int size, int align);
+  void (*emit_data_reloc)(FILE *out, char *label, long addend);
+  void (*emit_addr_of_global)(FILE *out, char *reg, char *name);
+} Arm64TargetOps;
+
+const Arm64TargetOps *get_arm64_target_ops(void);
 int align_to(int n, int align);
 
 //

@@ -52,6 +52,8 @@ static void usage(int status) {
   fprintf(out, "    Supported triples/aliases:\n");
   fprintf(out, "      x86_64, x86_64-linux-gnu, amd64, amd64-linux-gnu\n");
   fprintf(out, "      aarch64, aarch64-linux-gnu, arm64\n");
+  fprintf(out, "      arm64-apple-darwin, aarch64-apple-darwin\n");
+  fprintf(out, "    Note: Apple arm64 backend is early-stage; basic compile/link works, advanced features are still in progress\n");
   fprintf(out, "\n");
   fprintf(out, "Compilation stages:\n");
   fprintf(out, "  -E                         Preprocess only\n");
@@ -125,6 +127,32 @@ static bool startswith(char *p, char *q) {
   return strncmp(p, q, strlen(q)) == 0;
 }
 
+static char *get_macos_sdk_path(void) {
+  static char *cached;
+  if (cached)
+    return cached;
+
+  char *sdkroot = getenv("SDKROOT");
+  if (sdkroot && sdkroot[0]) {
+    cached = sdkroot;
+    return cached;
+  }
+
+  FILE *fp = popen("xcrun --sdk macosx --show-sdk-path 2>/dev/null", "r");
+  if (!fp)
+    return NULL;
+
+  char buf[4096];
+  if (fgets(buf, sizeof(buf), fp)) {
+    buf[strcspn(buf, "\r\n")] = '\0';
+    if (buf[0])
+      cached = strdup(buf);
+  }
+
+  pclose(fp);
+  return cached;
+}
+
 static void parse_target_args(int argc, char **argv) {
   for (int i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "-target")) {
@@ -157,8 +185,12 @@ static void add_default_include_paths(char *argv0) {
   case TARGET_X86_64:
     strarray_push(&include_paths, "/usr/include/x86_64-linux-gnu");
     break;
-  case TARGET_AARCH64:
+  case TARGET_AARCH64_LINUX:
     strarray_push(&include_paths, "/usr/include/aarch64-linux-gnu");
+    break;
+  case TARGET_AARCH64_DARWIN:
+    if (get_macos_sdk_path())
+      strarray_push(&include_paths, format("%s/usr/include", get_macos_sdk_path()));
     break;
   }
   strarray_push(&include_paths, "/usr/include");
@@ -474,6 +506,25 @@ static bool endswith(char *p, char *q) {
   return (len1 >= len2) && !strcmp(p + len1 - len2, q);
 }
 
+static char *find_executable(char *name) {
+  if (strchr(name, '/'))
+    return access(name, X_OK) == 0 ? name : NULL;
+
+  char *path_env = getenv("PATH");
+  if (!path_env)
+    return NULL;
+
+  char *paths = strdup(path_env);
+
+  for (char *dir = strtok(paths, ":"); dir; dir = strtok(NULL, ":")) {
+    char *path = format("%s/%s", *dir ? dir : ".", name);
+    if (access(path, X_OK) == 0)
+      return path;
+  }
+
+  return NULL;
+}
+
 // Replace file extension
 static char *replace_extn(char *tmpl, char *extn) {
   char *filename = basename(strdup(tmpl));
@@ -679,14 +730,70 @@ static void cc1(void) {
 }
 
 static void assemble(char *input, char *output) {
-  char *cmd[] = {
-    current_target == TARGET_AARCH64 ? "aarch64-linux-gnu-as" : "as",
-    "-c",
-    input,
-    "-o",
-    output,
-    NULL,
-  };
+  if (current_target == TARGET_AARCH64_DARWIN) {
+    char *clang = find_executable("clang");
+    if (!clang)
+      error("Apple arm64 assembly requires 'clang' in PATH");
+
+    StringArray arr = {};
+    strarray_push(&arr, clang);
+    strarray_push(&arr, "-c");
+    strarray_push(&arr, "-x");
+    strarray_push(&arr, "assembler");
+    strarray_push(&arr, "-target");
+    strarray_push(&arr, "arm64-apple-darwin");
+
+    char *sdk = get_macos_sdk_path();
+    if (sdk) {
+      strarray_push(&arr, "-isysroot");
+      strarray_push(&arr, sdk);
+    }
+
+    strarray_push(&arr, input);
+    strarray_push(&arr, "-o");
+    strarray_push(&arr, output);
+    strarray_push(&arr, NULL);
+    run_subprocess(arr.data);
+    return;
+  }
+
+  if (current_target == TARGET_AARCH64_LINUX) {
+    char *assembler = find_executable("aarch64-linux-gnu-as");
+    if (assembler) {
+      char *cmd[] = {
+        assembler,
+        "-c",
+        input,
+        "-o",
+        output,
+        NULL,
+      };
+      run_subprocess(cmd);
+      return;
+    }
+
+    char *clang = find_executable("clang");
+    if (clang) {
+      char *cmd[] = {
+        clang,
+        "-c",
+        "-x",
+        "assembler",
+        "-target",
+        "aarch64-linux-gnu",
+        input,
+        "-o",
+        output,
+        NULL,
+      };
+      run_subprocess(cmd);
+      return;
+    }
+
+    error("ARM64 assembly requires 'aarch64-linux-gnu-as' or 'clang' in PATH");
+  }
+
+  char *cmd[] = {"as", "-c", input, "-o", output, NULL};
   run_subprocess(cmd);
 }
 
@@ -712,13 +819,16 @@ static char *find_libpath(void) {
       return "/usr/lib/x86_64-linux-gnu";
     if (file_exists("/usr/lib64/crti.o"))
       return "/usr/lib64";
-  } else {
+  } else if (current_target == TARGET_AARCH64_LINUX) {
     if (file_exists("/usr/lib/aarch64-linux-gnu/crti.o"))
       return "/usr/lib/aarch64-linux-gnu";
     if (file_exists("/lib/aarch64-linux-gnu/crti.o"))
       return "/lib/aarch64-linux-gnu";
     if (file_exists("/usr/aarch64-linux-gnu/lib/crti.o"))
       return "/usr/aarch64-linux-gnu/lib";
+    error("ARM64 linking requires an AArch64 Linux sysroot with crt objects (e.g. crti.o); no aarch64-linux-gnu runtime was found");
+  } else {
+    error("Apple arm64 linking path is not wired yet");
   }
   error("library path is not found");
 }
@@ -731,10 +841,12 @@ static char *find_gcc_libpath(void) {
     paths[len++] = "/usr/lib/gcc/x86_64-linux-gnu/*/crtbegin.o";
     paths[len++] = "/usr/lib/gcc/x86_64-pc-linux-gnu/*/crtbegin.o";
     paths[len++] = "/usr/lib/gcc/x86_64-redhat-linux/*/crtbegin.o";
-  } else {
+  } else if (current_target == TARGET_AARCH64_LINUX) {
     paths[len++] = "/usr/lib/gcc/aarch64-linux-gnu/*/crtbegin.o";
     paths[len++] = "/usr/lib/gcc-cross/aarch64-linux-gnu/*/crtbegin.o";
     paths[len++] = "/usr/aarch64-linux-gnu/lib/gcc/aarch64-linux-gnu/*/crtbegin.o";
+  } else {
+    error("Apple arm64 linking path is not wired yet");
   }
 
   for (int i = 0; i < len; i++) {
@@ -743,17 +855,50 @@ static char *find_gcc_libpath(void) {
       return dirname(path);
   }
 
+  if (current_target == TARGET_AARCH64_LINUX)
+    error("ARM64 linking requires AArch64 Linux GCC runtime objects (e.g. crtbegin.o); no aarch64-linux-gnu GCC runtime was found");
+
   error("gcc library path is not found");
 }
 
 static void run_linker(StringArray *inputs, char *output) {
+  if (current_target == TARGET_AARCH64_DARWIN) {
+    char *clang = find_executable("clang");
+    if (!clang)
+      error("Apple arm64 linking requires 'clang' in PATH");
+
+    StringArray arr = {};
+    strarray_push(&arr, clang);
+    strarray_push(&arr, "-target");
+    strarray_push(&arr, "arm64-apple-darwin");
+
+    char *sdk = get_macos_sdk_path();
+    if (sdk) {
+      strarray_push(&arr, "-isysroot");
+      strarray_push(&arr, sdk);
+    }
+
+    strarray_push(&arr, "-o");
+    strarray_push(&arr, output);
+
+    for (int i = 0; i < ld_extra_args.len; i++)
+      strarray_push(&arr, ld_extra_args.data[i]);
+
+    for (int i = 0; i < inputs->len; i++)
+      strarray_push(&arr, inputs->data[i]);
+
+    strarray_push(&arr, NULL);
+    run_subprocess(arr.data);
+    return;
+  }
+
   StringArray arr = {};
 
-  strarray_push(&arr, current_target == TARGET_AARCH64 ? "aarch64-linux-gnu-ld" : "ld");
+  strarray_push(&arr, current_target == TARGET_AARCH64_LINUX ? "aarch64-linux-gnu-ld" : "ld");
   strarray_push(&arr, "-o");
   strarray_push(&arr, output);
   strarray_push(&arr, "-m");
-  strarray_push(&arr, current_target == TARGET_AARCH64 ? "aarch64linux" : "elf_x86_64");
+  strarray_push(&arr, current_target == TARGET_AARCH64_LINUX ? "aarch64linux" : "elf_x86_64");
 
   char *libpath = find_libpath();
   char *gcc_libpath = find_gcc_libpath();
@@ -785,7 +930,7 @@ static void run_linker(StringArray *inputs, char *output) {
 
   if (!opt_static) {
     strarray_push(&arr, "-dynamic-linker");
-    strarray_push(&arr, current_target == TARGET_AARCH64
+    strarray_push(&arr, current_target == TARGET_AARCH64_LINUX
       ? "/lib/ld-linux-aarch64.so.1"
       : "/lib64/ld-linux-x86-64.so.2");
   }

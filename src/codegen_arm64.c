@@ -6,11 +6,26 @@
 static FILE *output_file;
 static int depth;
 static Obj *current_fn;
+static const Arm64TargetOps *arm64_ops;
 static char *argreg32[] = {"w0", "w1", "w2", "w3", "w4", "w5", "w6", "w7"};
 static char *argreg64[] = {"x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7"};
 
+extern const Arm64TargetOps arm64_linux_target_ops;
+extern const Arm64TargetOps arm64_apple_target_ops;
+
 static void gen_expr(Node *node);
 static void gen_stmt(Node *node);
+
+const Arm64TargetOps *get_arm64_target_ops(void) {
+  switch (current_target) {
+  case TARGET_AARCH64_LINUX:
+    return &arm64_linux_target_ops;
+  case TARGET_AARCH64_DARWIN:
+    return &arm64_apple_target_ops;
+  default:
+    error("internal error: ARM64 target ops requested for non-ARM64 target");
+  }
+}
 
 __attribute__((format(printf, 1, 2)))
 static void println(char *fmt, ...) {
@@ -297,8 +312,8 @@ static void gen_addr(Node *node) {
     if (opt_fpic)
       error_tok(node->tok, "ARM64 backend does not support PIC yet");
 
-    println("  adrp x0, %s", node->var->name);
-    println("  add x0, x0, :lo12:%s", node->var->name);
+    arm64_ops->emit_addr_of_global(output_file, "x0",
+                     arm64_ops->asm_symbol_name(node->var->name, false));
     return;
   case ND_DEREF:
     gen_expr(node->lhs);
@@ -847,7 +862,15 @@ static void gen_expr(Node *node) {
     }
 
     int stack_area = push_args(node);
-    gen_expr(node->lhs);
+    bool direct_call =
+      node->lhs->kind == ND_VAR &&
+      node->lhs->var &&
+      node->lhs->var->ty->kind == TY_FUNC;
+
+    if (!direct_call) {
+      gen_expr(node->lhs);
+      println("  mov x16, x0");
+    }
 
     int gp = 0;
     int fp = 0;
@@ -876,8 +899,10 @@ static void gen_expr(Node *node) {
       }
     }
 
-    println("  mov x16, x0");
-    println("  blr x16");
+    if (direct_call)
+      println("  bl %s", arm64_ops->asm_symbol_name(node->lhs->var->name, false));
+    else
+      println("  blr x16");
 
     if (stack_area) {
       println("  add sp, sp, #%d", stack_area);
@@ -945,6 +970,9 @@ static void gen_expr(Node *node) {
       return;
     }
     error_tok(node->tok, "invalid expression");
+  }
+  default:
+    break;
   }
 
   gen_expr(node->rhs);
@@ -1015,7 +1043,6 @@ static void gen_expr(Node *node) {
     }
 
     error_tok(node->tok, "invalid expression");
-  }
 }
 
 static void compare_case_value(char *reg, long value) {
@@ -1203,16 +1230,15 @@ static void emit_data(Obj *prog) {
     if (var->is_function || !var->is_definition)
       continue;
 
-    if (var->is_static)
-      println("  .local %s", var->name);
-    else
-      println("  .globl %s", var->name);
+    char *asm_name = arm64_ops->asm_symbol_name(var->name, true);
+
+    arm64_ops->emit_global_directive(output_file, asm_name, var->is_static);
 
     int align = (var->ty->kind == TY_ARRAY && var->ty->size >= 16)
       ? MAX(16, var->align) : var->align;
 
     if (opt_fcommon && var->is_tentative) {
-      println("  .comm %s, %d, %d", var->name, var->ty->size, align);
+      arm64_ops->emit_common_symbol(output_file, asm_name, var->ty->size, align);
       continue;
     }
 
@@ -1220,17 +1246,16 @@ static void emit_data(Obj *prog) {
       if (var->is_tls)
         error("ARM64 backend does not support TLS data yet");
 
-      println("  .data");
-      println("  .type %s, %%object", var->name);
-      println("  .size %s, %d", var->name, var->ty->size);
-      println("  .balign %d", align);
-      println("%s:", var->name);
+      arm64_ops->emit_data_symbol_header(output_file, asm_name, var->ty->size, align);
 
       Relocation *rel = var->rel;
       int pos = 0;
       while (pos < var->ty->size) {
         if (rel && rel->offset == pos) {
-          println("  .xword %s%+ld", *rel->label, rel->addend);
+          arm64_ops->emit_data_reloc(
+            output_file,
+            arm64_ops->asm_symbol_name(*rel->label, false),
+            rel->addend);
           rel = rel->next;
           pos += 8;
         } else {
@@ -1240,10 +1265,7 @@ static void emit_data(Obj *prog) {
       continue;
     }
 
-    println("  .bss");
-    println("  .balign %d", align);
-    println("%s:", var->name);
-    println("  .zero %d", var->ty->size);
+    arm64_ops->emit_bss_symbol_header(output_file, asm_name, align, var->ty->size);
   }
 }
 
@@ -1288,17 +1310,9 @@ static void emit_text(Obj *prog) {
     if (!fn->is_live)
       continue;
 
-    if (fn->va_area)
-      error_tok(fn->tok, "ARM64 backend does not support variadic functions yet");
-
-    if (fn->is_static)
-      println("  .local %s", fn->name);
-    else
-      println("  .globl %s", fn->name);
-
-    println("  .text");
-    println("  .type %s, %%function", fn->name);
-    println("%s:", fn->name);
+    char *asm_name = arm64_ops->asm_symbol_name(fn->name, true);
+    arm64_ops->emit_global_directive(output_file, asm_name, fn->is_static);
+    arm64_ops->emit_text_symbol_header(output_file, asm_name);
     current_fn = fn;
 
     println("  stp x29, x30, [sp, #-16]!");
@@ -1311,7 +1325,57 @@ static void emit_text(Obj *prog) {
       println("  sub sp, sp, x15");
     }
     addr_from_fp("x15", fn->alloca_bottom->offset);
-    println("  str sp, [x15]");
+    println("  mov x14, sp");
+    println("  str x14, [x15]");
+
+    if (fn->va_area) {
+      int gp = 0;
+      int fp = 0;
+      for (Obj *var = fn->params; var; var = var->next) {
+        Type *ty = var->ty;
+        switch (ty->kind) {
+        case TY_STRUCT:
+        case TY_UNION:
+          gp += !has_flonum1(ty) + !has_flonum2(ty);
+          fp += has_flonum1(ty) + has_flonum2(ty);
+          break;
+        case TY_FLOAT:
+        case TY_DOUBLE:
+        case TY_LDOUBLE:
+          fp++;
+          break;
+        default:
+          gp++;
+          break;
+        }
+      }
+
+      gp = MIN(gp, GP_MAX);
+      fp = MIN(fp, FP_MAX);
+
+      int off = fn->va_area->offset;
+      // __va_elem: gp_offset, fp_offset, overflow_arg_area, reg_save_area
+      addr_from_fp("x15", off);
+      mov_imm("x14", gp * 8);
+      println("  str w14, [x15]");
+      mov_imm("x14", fp * 8 + GP_MAX * 8);
+      println("  str w14, [x15, #4]");
+
+      // overflow_arg_area points to the first stack-passed argument (x29 + 16).
+      add_imm("x14", "x29", 16);
+      println("  str x14, [x15, #8]");
+
+      // reg_save_area starts after __va_elem metadata.
+      add_imm("x14", "x29", off + 24);
+      println("  str x14, [x15, #16]");
+
+      // Save argument registers to __reg_save_area__.
+      addr_from_fp("x15", off + 24);
+      for (int i = 0; i < GP_MAX; i++)
+        println("  str x%d, [x15, #%d]", i, i * 8);
+      for (int i = 0; i < FP_MAX; i++)
+        println("  str d%d, [x15, #%d]", i, GP_MAX * 8 + i * 8);
+    }
 
     int gp = 0;
     int fp = 0;
@@ -1362,10 +1426,11 @@ static void emit_text(Obj *prog) {
 
 void codegen_arm64(Obj *prog, FILE *out) {
   output_file = out;
+  arm64_ops = get_arm64_target_ops();
 
   File **files = get_input_files();
   for (int i = 0; files[i]; i++)
-    println("  .file %d \"%s\"", files[i]->file_no, files[i]->name);
+    arm64_ops->emit_file_directive(output_file, files[i]->file_no, files[i]->name);
 
   assign_lvar_offsets(prog);
   emit_data(prog);

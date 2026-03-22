@@ -9,7 +9,8 @@ void codegen(Obj *prog, FILE *out) {
   case TARGET_X86_64:
     codegen_x86(prog, out);
     return;
-  case TARGET_AARCH64:
+  case TARGET_AARCH64_LINUX:
+  case TARGET_AARCH64_DARWIN:
     codegen_arm64(prog, out);
     return;
   }

@@ -57,6 +57,17 @@ I pronounce chibicc as _chee bee cee cee_. "chibi" means "mini" or
 chibicc supports almost all mandatory features and most optional
 features of C11 as well as a few GCC language extensions.
 
+This fork has runtime target selection for x86-64 and AArch64, but the
+current AArch64 backend emits Linux ELF-style assembly and expects a
+Linux AArch64 sysroot at link time. In other words, `-target arm64`
+currently means `aarch64-linux-gnu`, not native Apple Silicon
+(`arm64-apple-darwin`) output.
+
+`arm64-apple-darwin` support is now scaffolded with a separate target
+file and basic Mach-O assembly/object/executable flow via `clang`
+(`-S`, `-c`, and simple links). It is still early-stage: advanced ABI
+coverage and some runtime/library scenarios are still in progress.
+
 Features that are often missing in a small compiler but supported by
 chibicc include (but not limited to):
 
